@@ -1,11 +1,28 @@
 #include <stdio.h>
 #include <unistd.h>
+#include <string.h>
 
 #include "discovery.h"
 
-
-int main(void)
+int main(int argc, char *argv)
 {
+
+    int cost_cut_mode = 0;
+
+    if (argc == 2 &&
+        strcmp(argv[1], "--cost-cutting") == 0)
+    {
+        cost_cut_mode = 1;
+    }
+    else if (argc != 1)
+    {
+        printf("Usage: %s [--cost-cutting]\n", argv[0]);
+        return 1;
+    }
+
+    struct sockaddr_in opponent_addr;
+    memset(&opponent_addr, 0, sizeof(opponent_addr));
+
     int tcp_fd =
         create_tcp_listener();
 
@@ -42,6 +59,8 @@ int main(void)
         struct Player *tail = NULL;
 
         int codebreaker = 0;
+        struct sockaddr_in game_opponent_addr;
+        memset(&game_opponent_addr, 0, sizeof(game_opponent_addr));
 
         int game_fd = discovery_loop(
             udp_fd,
@@ -49,13 +68,17 @@ int main(void)
             message,
             &head,
             &tail,
-            &codebreaker);
+            &codebreaker,
+            cost_cut_mode,
+            &game_opponent_addr);
 
         if (game_fd >= 0)
         {
             game_loop(
                 game_fd,
-                codebreaker);
+                codebreaker,
+                &game_opponent_addr,
+                cost_cut_mode);
 
             close(game_fd);
         }

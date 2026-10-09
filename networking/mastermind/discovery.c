@@ -20,10 +20,6 @@
 #define BROADCAST_INTERVAL 2
 #define PLAYER_TIMEOUT 5
 
-
-
-
-
 /* ---------------- TCP LISTENER ---------------- */
 
 int create_tcp_listener(void)
@@ -92,10 +88,10 @@ int create_tcp_listener(void)
     return sockfd;
 }
 
-
 /* ---------------- UDP SOCKET ---------------- */
 
 int create_udp_socket(void)
+
 {
     struct addrinfo hints;
     struct addrinfo *result;
@@ -186,7 +182,6 @@ int create_udp_socket(void)
     return sockfd;
 }
 
-
 /* ---------------- PLAYER NAME ---------------- */
 
 void get_player_name(
@@ -211,7 +206,6 @@ void get_player_name(
     name[strcspn(name, "\n")] = '\0';
 }
 
-
 /* ---------------- DISCOVERY ---------------- */
 
 void create_discovery_message(
@@ -227,7 +221,6 @@ void create_discovery_message(
         name,
         TCP_PORT);
 }
-
 
 void broadcast_discovery(
     int udp_fd,
@@ -262,7 +255,6 @@ void broadcast_discovery(
     }
 }
 
-
 /* ---------------- PLAYER TABLE ---------------- */
 
 struct Player *find_player(
@@ -285,7 +277,6 @@ struct Player *find_player(
 
     return NULL;
 }
-
 
 void add_player(
     struct Player **head,
@@ -316,16 +307,14 @@ void add_player(
         name,
         sizeof(new_player->name) - 1);
 
-    new_player->name[
-        sizeof(new_player->name) - 1] = '\0';
+    new_player->name[sizeof(new_player->name) - 1] = '\0';
 
     strncpy(
         new_player->ip,
         ip,
         sizeof(new_player->ip) - 1);
 
-    new_player->ip[
-        sizeof(new_player->ip) - 1] = '\0';
+    new_player->ip[sizeof(new_player->ip) - 1] = '\0';
 
     new_player->port = port;
     new_player->last_seen = time(NULL);
@@ -350,7 +339,6 @@ void add_player(
         new_player->ip,
         new_player->port);
 }
-
 
 void print_players(
     struct Player *head)
@@ -390,7 +378,6 @@ void print_players(
     printf("> ");
     fflush(stdout);
 }
-
 
 void receive_discovery(
     int udp_fd,
@@ -479,8 +466,7 @@ void receive_discovery(
             player_name,
             sizeof(found->name) - 1);
 
-        found->name[
-            sizeof(found->name) - 1] = '\0';
+        found->name[sizeof(found->name) - 1] = '\0';
     }
     else
     {
@@ -494,7 +480,6 @@ void receive_discovery(
 
     print_players(*head);
 }
-
 
 int remove_expired_players(
     struct Player **head,
@@ -549,7 +534,6 @@ int remove_expired_players(
     return removed;
 }
 
-
 struct Player *find_player_by_id(
     struct Player *head,
     int id)
@@ -568,7 +552,6 @@ struct Player *find_player_by_id(
 
     return NULL;
 }
-
 
 /* ---------------- OUTGOING TCP ---------------- */
 
@@ -640,11 +623,10 @@ int connect_to_player(
     return sockfd;
 }
 
-
 /* ---------------- INCOMING TCP ---------------- */
 
 int handle_incoming_connection(
-    int conn_fd)
+    int conn_fd, int cost_cut_mode, struct sockaddr_in *client_addr)
 {
     char buffer[100];
 
@@ -686,9 +668,7 @@ int handle_incoming_connection(
         return -1;
     }
 
-    answer[
-        strcspn(answer, "\n")] = '\0';
-
+    answer[strcspn(answer, "\n")] = '\0';
     if (strcmp(answer, "yes") == 0)
     {
         send(
@@ -697,8 +677,52 @@ int handle_incoming_connection(
             3,
             0);
 
-        printf(
-            "Challenge accepted\n");
+        printf("Challenge accepted\n");
+
+        // Capture the opponent's address from the TCP connection
+        socklen_t len = sizeof(*client_addr);
+        if (getpeername(conn_fd, (struct sockaddr *)client_addr, &len) < 0) {
+            perror("getpeername");
+            close(conn_fd);
+            return -1;
+        }
+
+        if (cost_cut_mode)
+        {
+            char buffer[100];
+
+            int n = recv(
+                conn_fd,
+                buffer,
+                sizeof(buffer) - 1,
+                0);
+
+            if (n <= 0)
+            {
+                close(conn_fd);
+                return -1;
+            }
+
+            buffer[n] = '\0';
+
+            if (strcmp(
+                    buffer,
+                    "SWITCH_TO_UDP") == 0)
+            {
+                printf(
+                    "Switching to UDP...\n");
+
+                close(conn_fd);
+
+                int udp_game_fd = create_udp_game_socket(TCP_PORT);
+                if (udp_game_fd < 0)
+                {
+                    return -1;
+                }
+
+                return udp_game_fd;
+            }
+        }
 
         return conn_fd;
     }
@@ -727,7 +751,6 @@ int handle_incoming_connection(
     return -1;
 }
 
-
 /* ---------------- DISCOVERY LOOP ---------------- */
 
 int discovery_loop(
@@ -736,7 +759,9 @@ int discovery_loop(
     const char *message,
     struct Player **head,
     struct Player **tail,
-    int *codebreaker)
+    int *codebreaker,
+    int cost_cut_mode,
+    struct sockaddr_in *game_opponent_addr)
 {
     time_t last_broadcast = 0;
 
@@ -806,7 +831,7 @@ int discovery_loop(
             msg_copy[sizeof(msg_copy) - 1] = '\0';
 
             char *name_part = strtok(msg_copy, "|"); // MAGIC
-            name_part = strtok(NULL, "|"); // name
+            name_part = strtok(NULL, "|");           // name
 
             receive_discovery(
                 udp_fd,
@@ -894,14 +919,43 @@ int discovery_loop(
                         {
                             response[n] = '\0';
 
-                            if (strcmp(
-                                    response,
-                                    "yes") == 0)
+                            if (strcmp(response, "yes") == 0)
                             {
                                 *codebreaker = 0;
 
-                                printf(
-                                    "Challenge accepted\n");
+                                printf("Challenge accepted\n");
+                                struct sockaddr_in opponent_addr;
+
+                                memset(&opponent_addr, 0, sizeof(opponent_addr));
+
+                                opponent_addr.sin_family = AF_INET;
+
+                                opponent_addr.sin_port =
+                                    htons(player->port);
+
+                                inet_pton(
+                                    AF_INET,
+                                    player->ip,
+                                    &opponent_addr.sin_addr);
+
+                                if (cost_cut_mode)
+                                {
+                                    send(
+                                        tcp_fd,
+                                        "SWITCH_TO_UDP",
+                                        strlen("SWITCH_TO_UDP"),
+                                        0);
+
+                                    close(tcp_fd);
+
+                                    int udp_game_fd = create_udp_game_socket(TCP_PORT);
+                                    if (udp_game_fd < 0)
+                                    {
+                                        return -1;
+                                    }
+
+                                    return udp_game_fd;
+                                }
 
                                 return tcp_fd;
                             }
@@ -938,7 +992,7 @@ int discovery_loop(
             {
                 int game_fd =
                     handle_incoming_connection(
-                        conn_fd);
+                        conn_fd, cost_cut_mode, &game_opponent_addr);
 
                 if (game_fd >= 0)
                 {
@@ -958,20 +1012,40 @@ int discovery_loop(
     }
 }
 
-
 /* ---------------- GAME DISPATCHER ---------------- */
+
 
 void game_loop(
     int game_fd,
-    int codebreaker)
+    int codebreaker,
+    struct sockaddr_in *opponent_addr,
+    int cost_cut_mode)
 {
-    if (codebreaker)
+    if (cost_cut_mode)
     {
-        codebreaker_game(game_fd);
+        if (codebreaker)
+        {
+            udp_codebreaker_game(
+                game_fd,
+                opponent_addr);
+        }
+        else
+        {
+            udp_mastermind_game(
+                game_fd,
+                opponent_addr);
+        }
     }
     else
     {
-        mastermind_game(game_fd);
+        if (codebreaker)
+        {
+            codebreaker_game(game_fd);
+        }
+        else
+        {
+            mastermind_game(game_fd);
+        }
     }
 }
 

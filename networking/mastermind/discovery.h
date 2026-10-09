@@ -50,7 +50,9 @@ int connect_to_player(
     struct Player *player);
 
 int handle_incoming_connection(
-    int conn_fd);
+    int conn_fd,
+    int cost_cut_mode,
+    struct sockaddr_in *client_addr);
 
 int discovery_loop(
     int udp_fd,
@@ -58,11 +60,15 @@ int discovery_loop(
     const char *message,
     struct Player **head,
     struct Player **tail,
-    int *codebreaker);
+    int *codebreaker,
+    int cost_cut_mode,
+    struct sockaddr_in *game_opponent_addr);
 
 void game_loop(
     int game_fd,
-    int codebreaker);
+    int codebreaker,
+    struct sockaddr_in *opponent_addr,
+    int cost_cut_mode);
 
 void free_players(
     struct Player *head);
