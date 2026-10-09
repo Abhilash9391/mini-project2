@@ -1,23 +1,30 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include "utils.h"
 
 #include "discovery.h"
 
-int main(int argc, char *argv)
+int main(int argc, char *argv[])
 {
 
     int cost_cut_mode = 0;
 
-    if (argc == 2 &&
-        strcmp(argv[1], "--cost-cutting") == 0)
+    for (int i = 1; i < argc; i++)
     {
-        cost_cut_mode = 1;
-    }
-    else if (argc != 1)
-    {
-        printf("Usage: %s [--cost-cutting]\n", argv[0]);
-        return 1;
+        if (strcmp(argv[i], "--cost-cutting") == 0)
+        {
+            cost_cut_mode = 1;
+        }
+        else if (strcmp(argv[i], "--log") == 0)
+        {
+            logging_enabled = 1;
+        }
+        else
+        {
+            printf("Usage: %s [--cost-cutting] [--log]\n", argv[0]);
+            return 1;
+        }
     }
 
     struct sockaddr_in opponent_addr;

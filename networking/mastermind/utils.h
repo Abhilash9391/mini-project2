@@ -5,6 +5,15 @@
 
 #define CODE_LENGTH 5
 #define UDP_CHUNK_SIZE 512
+#define MAX_RETRIES 10
+#define MAX_TOTAL_CHUNKS 1024
+#define RECV_TIMEOUT_SEC 5
+#define SEND_RETRY_TIMEOUT_SEC 0.1
+#define PKT_TYPE_DATA 0
+#define PKT_TYPE_ACK  1
+
+extern int logging_enabled;
+void log_event(const char *fmt, ...);
 
 void remove_newline(char *str);
 int valid_code(const char *code);

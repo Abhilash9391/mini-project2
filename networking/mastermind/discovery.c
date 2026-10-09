@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 
+#include "utils.h"
 #include "discovery.h"
 #include "mastermind.h"
 #include "codebreaker.h"
@@ -253,6 +254,10 @@ void broadcast_discovery(
     {
         perror("sendto");
     }
+    else
+    {
+        log_event("Discovery broadcast sent: %s", message);
+    }
 }
 
 /* ---------------- PLAYER TABLE ---------------- */
@@ -418,6 +423,8 @@ void receive_discovery(
         perror("inet_ntop");
         return;
     }
+
+    log_event("Discovery packet received from %s", ip);
 
     char *magic =
         strtok(buffer, "|");
