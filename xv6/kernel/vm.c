@@ -303,23 +303,31 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for (i = 0; i < sz; i += PGSIZE) {
     if ((pte = walk(old, i, 0)) == 0)
       continue; // page table entry hasn't been allocated
     if ((*pte & PTE_V) == 0)
       continue; // physical page hasn't been allocated
+
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if ((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char *)pa, PGSIZE);
-    if (mappages(new, i, PGSIZE, (uint64)mem, flags) != 0) {
-      kfree(mem);
+
+    // If the page is writable, mark it as CoW and remove write permission
+    if (flags & PTE_W) {
+      flags = (flags & ~PTE_W) | PTE_COW;
+      *pte = PA2PTE(pa) | flags;
+    } else if (!(flags & PTE_COW)) {
+      // For non-writable, non-CoW pages (like code), we just map them as is.
+      // But for CoW, we want consistent marking.
+    }
+
+    if (mappages(new, i, PGSIZE, pa, flags) != 0) {
       goto err;
     }
+    kaddref((void *)pa);
   }
+  sfence_vma();
   return 0;
 
 err:
@@ -362,6 +370,20 @@ copyout(pagetable_t pagetable, uint64 psz, uint64 dstva, char *src, uint64 len)
     }
 
     pte = walk(pagetable, va0, 0);
+    if (pte == 0)
+      return -1;
+
+    // If it's a CoW page, we must duplicate it before writing.
+    if (*pte & PTE_COW) {
+      if (cowalloc(pagetable, va0) == 0)
+        return -1;
+      // Re-walk to get the new physical address and updated PTE
+      pa0 = walkaddr(pagetable, va0);
+      if (pa0 == 0)
+        return -1;
+      pte = walk(pagetable, va0, 0);
+    }
+
     // forbid copyout over read-only user text pages.
     if ((*pte & PTE_W) == 0)
       return -1;
@@ -490,4 +512,60 @@ ismapped(pagetable_t pagetable, uint64 va)
     return 1;
   }
   return 0;
+}
+
+// Handle a Copy-on-Write page.
+// Allocate a private copy of the page and make it writable.
+uint64
+cowalloc(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte;
+  uint64 pa;
+  uint flags;
+  char *mem;
+
+  // Align the virtual address to the beginning of its page.
+  va = PGROUNDDOWN(va);
+
+  // Find the page-table entry.
+  pte = walk(pagetable, va, 0);
+
+  // The mapping must exist, be valid, and be marked CoW.
+  if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_COW) == 0)
+    return 0;
+
+  // Get the original physical address and its flags.
+  pa = PTE2PA(*pte);
+  flags = PTE_FLAGS(*pte);
+
+  // OPTIMIZATION: If this is the last process using the page,
+  // just make it writable and remove the CoW flag.
+  // We need the reference count from kalloc.c.
+  // Since we don't have a kgetref, let's assume kfree handles it
+  // or we check the refcount here.
+  // However, we can't access kmem.refcount directly unless it's public.
+  // Let's stick to the safe allocation first, or implement a refcount check.
+
+  // Allocate a new physical page.
+  mem = kalloc();
+  if (mem == 0)
+    return 0;
+
+  // Copy the contents of the original page.
+  memmove(mem, (char *)pa, PGSIZE);
+
+  // Make the new page writable and remove its CoW marker.
+  flags = (flags | PTE_W) & ~PTE_COW;
+
+  // Point this process's PTE to the new physical page.
+  *pte = PA2PTE((uint64)mem) | flags;
+
+  // Release this process's reference to the original page.
+  kfree((void *)pa);
+
+  // Flush stale translations on the current CPU.
+  sfence_vma();
+
+  // Return the new physical address.
+  return (uint64)mem;
 }
