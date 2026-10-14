@@ -89,10 +89,29 @@ usertrap(void)
 
   if (killed(p))
     kexit(-1);
+  // Handle alarms on timer interrupts.
+  if (which_dev == 2) {
+    if (p->alarm_interval > 0 && !p->alarm_active) {
+      p->alarm_ticks++;
 
-  // give up the CPU if this is a timer interrupt.
-  if (which_dev == 2)
+      if (p->alarm_ticks >= p->alarm_interval) {
+        // Save the interrupted user context.
+        memmove(p->alarm_trapframe, p->trapframe,
+                sizeof(struct trapframe));
+
+        // Mark the handler as active to prevent nested alarms.
+        p->alarm_active = 1;
+
+        // Reset the counter for the next alarm.
+        p->alarm_ticks = 0;
+
+        // Redirect execution to the user alarm handler.
+        p->trapframe->epc = p->alarm_handler;
+      }
+    }
+
     yield();
+  }
 
   prepare_return();
 
