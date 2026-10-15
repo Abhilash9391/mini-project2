@@ -73,6 +73,7 @@ int main(int argc, char *argv[])
             udp_fd,
             tcp_fd,
             message,
+            name,
             &head,
             &tail,
             &codebreaker,

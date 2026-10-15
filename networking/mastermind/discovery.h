@@ -58,6 +58,7 @@ int discovery_loop(
     int udp_fd,
     int tcp_listen_fd,
     const char *message,
+    const char *my_name,
     struct Player **head,
     struct Player **tail,
     int *codebreaker,

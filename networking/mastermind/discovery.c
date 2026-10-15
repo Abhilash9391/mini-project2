@@ -766,6 +766,7 @@ int discovery_loop(
     int udp_fd,
     int tcp_listen_fd,
     const char *message,
+    const char *my_name,
     struct Player **head,
     struct Player **tail,
     int *codebreaker,
@@ -834,19 +835,11 @@ int discovery_loop(
                 udp_fd,
                 &readfds))
         {
-            // Extract name from discovery message to pass to receive_discovery
-            char msg_copy[100];
-            strncpy(msg_copy, message, sizeof(msg_copy) - 1);
-            msg_copy[sizeof(msg_copy) - 1] = '\0';
-
-            char *name_part = strtok(msg_copy, "|"); // MAGIC
-            name_part = strtok(NULL, "|");           // name
-
             receive_discovery(
                 udp_fd,
                 head,
                 tail,
-                name_part ? name_part : "");
+                my_name);
         }
 
         if (FD_ISSET(
