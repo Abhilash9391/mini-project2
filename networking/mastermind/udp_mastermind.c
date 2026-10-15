@@ -89,7 +89,7 @@ int udp_mastermind_game(int fd, struct sockaddr_in *opponent_addr) {
 
         if (strcmp(feedback, "xxxxx") == 0 || attempts == MAX_ATTEMPTS) {
             char secret_message[100];
-            snprintf(secret_message, sizeof(secret_message), "SECRET %s", sequence);
+            snprintf(secret_message, sizeof(secret_message), "SECRET %.5s", sequence);
 
             if (udp_send_reliable(fd, opponent_addr, secret_message) < 0) {
                 printf("\nPlayer disconnected. Press Enter to go home.");
