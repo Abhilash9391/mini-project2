@@ -6,7 +6,7 @@
 
 #define MAX_ATTEMPTS 12
 
-void calculate_feedback(const char *sequence, const char *guess, char *feedback) {
+static void calculate_feedback(const char *sequence, const char *guess, char *feedback) {
     int used[CODE_LENGTH] = {0};
     for (int i = 0; i < CODE_LENGTH; i++) {
         if (guess[i] == sequence[i]) {

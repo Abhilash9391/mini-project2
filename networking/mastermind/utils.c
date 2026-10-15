@@ -157,7 +157,7 @@ int udp_send_reliable(int fd, struct sockaddr_in *dest, const char *data) {
         chunks[i].acked = 0;
         chunks[i].retries = 0;
         uint32_t offset = i * UDP_CHUNK_SIZE;
-        uint32_t chunk_data_len = (data_len > (i + 1) * UDP_CHUNK_SIZE) ? UDP_CHUNK_SIZE : (data_len - offset);
+        uint32_t chunk_data_len = ((uint32_t)data_len > (i + 1) * UDP_CHUNK_SIZE) ? UDP_CHUNK_SIZE : ((uint32_t)data_len - offset);
         if (data_len == 0) chunk_data_len = 0;
 
         uint32_t net_seq = htonl(chunks[i].seq);
@@ -181,7 +181,7 @@ int udp_send_reliable(int fd, struct sockaddr_in *dest, const char *data) {
     }
 
     int acked_count = 0;
-    while (acked_count < total_chunks) {
+    while ((uint32_t)acked_count < total_chunks) {
         fd_set readfds;
         FD_ZERO(&readfds);
         FD_SET(fd, &readfds);
@@ -190,7 +190,7 @@ int udp_send_reliable(int fd, struct sockaddr_in *dest, const char *data) {
             char ack_buf[8];
             struct sockaddr_in from;
             socklen_t from_len = sizeof(from);
-            if (recvfrom(fd, ack_buf, sizeof(ack_buf), MSG_DONTWAIT, (struct sockaddr *)&from, &from_len) == 8) {
+            if (recvfrom(fd, ack_buf, sizeof(ack_buf), 0, (struct sockaddr *)&from, &from_len) == 8) {
                 if (memcmp(&from, dest, sizeof(struct sockaddr_in)) == 0 && ack_buf[0] == PKT_TYPE_ACK) {
                     uint32_t seq;
                     memcpy(&seq, ack_buf + 4, 4);
@@ -265,7 +265,7 @@ int udp_recv_reliable(int fd, struct sockaddr_in *src, char *buffer, int size) {
         uint32_t total = ntohl(net_total);
         uint32_t len = ntohl(net_len);
 
-        if (len > UDP_CHUNK_SIZE || n != 16 + len || total == 0 || total > MAX_TOTAL_CHUNKS) continue;
+        if ((uint32_t)len > UDP_CHUNK_SIZE || (uint32_t)n != 16 + len || total == 0 || total > MAX_TOTAL_CHUNKS) continue;
 
         log_event("Received UDP chunk %u of %u", seq, total);
 

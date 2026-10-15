@@ -6,7 +6,7 @@
 
 #define MAX_ATTEMPTS 12
 
-int valid_feedback(const char *feedback) {
+static int valid_feedback(const char *feedback) {
     if (strlen(feedback) != CODE_LENGTH) return 0;
     for (int i = 0; i < CODE_LENGTH; i++) {
         if (feedback[i] != 'x' && feedback[i] != 'o' && feedback[i] != '-') return 0;

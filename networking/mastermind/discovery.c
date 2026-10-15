@@ -11,6 +11,8 @@
 
 #include "utils.h"
 #include "discovery.h"
+#include "udp_codebreaker.h"
+#include "udp_mastermind.h"
 #include "mastermind.h"
 #include "codebreaker.h"
 
@@ -999,7 +1001,7 @@ int discovery_loop(
             {
                 int game_fd =
                     handle_incoming_connection(
-                        conn_fd, cost_cut_mode, &game_opponent_addr);
+                        conn_fd, cost_cut_mode, game_opponent_addr);
 
                 if (game_fd >= 0)
                 {

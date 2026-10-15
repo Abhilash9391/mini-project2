@@ -8,6 +8,9 @@
 #include <netdb.h>
 #include <errno.h>
 #include <signal.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <time.h>
 
 #define PORT "80"
 
@@ -73,29 +76,40 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    int raw = 0;
-
-    if (argc == 3)
+    if (argc == 3 && strcmp(argv[2], "--raw") != 0)
     {
-        if (strcmp(argv[2], "--raw") != 0)
-        {
-            fprintf(stderr, "tempest: only accepted flag is --raw\n");
-            return 1;
-        }
-
-        raw = 1;
+        fprintf(stderr, "tempest: too many arguments\n");
+        return 1;
     }
 
+    int raw = (argc == 3);
+
     signal(SIGALRM, timeout_handler);
+    alarm(10);
 
     char *hostName = "wttr.is";
-    char path[1024];
+    char path[2048];
+    char encoded_city[1024];
+    int encoded_len = 0;
+
+    for (int i = 0; argv[1][i] != '\0'; i++) {
+        unsigned char c = argv[1][i];
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+            c == '-' || c == '_' || c == '.' || c == '~') {
+            encoded_city[encoded_len++] = c;
+        } else {
+            if (encoded_len + 3 >= 1024) break;
+            sprintf(&encoded_city[encoded_len], "%%%02X", c);
+            encoded_len += 3;
+        }
+    }
+    encoded_city[encoded_len] = '\0';
 
     snprintf(
         path,
         sizeof(path),
         "/%s?0T",
-        argv[1]);
+        encoded_city);
 
     struct addrinfo hints;
     struct addrinfo *result;
@@ -129,14 +143,29 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    alarm(10);
+    int flags = fcntl(sockfd, F_GETFL, 0);
+    if (flags == -1) {
+        perror("fcntl get");
+        close(sockfd);
+        freeaddrinfo(result);
+        return 1;
+    }
+    if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) == -1) {
+        perror("fcntl set");
+        close(sockfd);
+        freeaddrinfo(result);
+        return 1;
+    }
+
+    struct timespec start_time, current_time;
+    clock_gettime(CLOCK_MONOTONIC, &start_time);
 
     status = connect(
         sockfd,
         result->ai_addr,
         result->ai_addrlen);
 
-    if (status == -1)
+    if (status == -1 && errno != EINPROGRESS)
     {
         if (errno == EINTR && timed_out)
         {
@@ -150,6 +179,56 @@ int main(int argc, char *argv[])
         close(sockfd);
         freeaddrinfo(result);
         return 1;
+    }
+
+    if (status == -1 && errno == EINPROGRESS)
+    {
+        struct pollfd pfd;
+        pfd.fd = sockfd;
+        pfd.events = POLLOUT;
+
+        while (1) {
+            clock_gettime(CLOCK_MONOTONIC, &current_time);
+            long remaining_ms = 10000 - (current_time.tv_sec - start_time.tv_sec) * 1000
+                                - (current_time.tv_nsec - start_time.tv_nsec) / 1000000;
+
+            if (remaining_ms <= 0) {
+                fprintf(stderr, "tempest: request timed out\n");
+                close(sockfd);
+                freeaddrinfo(result);
+                return 1;
+            }
+
+            int poll_res = poll(&pfd, 1, remaining_ms);
+            if (poll_res == 0) {
+                fprintf(stderr, "tempest: request timed out\n");
+                close(sockfd);
+                freeaddrinfo(result);
+                return 1;
+            } else if (poll_res == -1) {
+                if (errno == EINTR) continue;
+                perror("poll");
+                close(sockfd);
+                freeaddrinfo(result);
+                return 1;
+            }
+
+            int so_error;
+            socklen_t len = sizeof(so_error);
+            if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &so_error, &len) < 0) {
+                perror("getsockopt");
+                close(sockfd);
+                freeaddrinfo(result);
+                return 1;
+            }
+            if (so_error != 0) {
+                fprintf(stderr, "connect failed: %s\n", strerror(so_error));
+                close(sockfd);
+                freeaddrinfo(result);
+                return 1;
+            }
+            break;
+        }
     }
 
     char buffer[1024];
@@ -168,6 +247,34 @@ int main(int argc, char *argv[])
 
     while (total_sent < req_len)
     {
+        struct pollfd pfd;
+        pfd.fd = sockfd;
+        pfd.events = POLLOUT;
+
+        clock_gettime(CLOCK_MONOTONIC, &current_time);
+        long remaining_ms = 10000 - (current_time.tv_sec - start_time.tv_sec) * 1000
+                            - (current_time.tv_nsec - start_time.tv_nsec) / 1000000;
+
+        if (remaining_ms <= 0) {
+            fprintf(stderr, "tempest: request timed out\n");
+            close(sockfd);
+            freeaddrinfo(result);
+            return 1;
+        }
+
+        int poll_res = poll(&pfd, 1, remaining_ms);
+        if (poll_res == 0) {
+            fprintf(stderr, "tempest: request timed out\n");
+            close(sockfd);
+            freeaddrinfo(result);
+            return 1;
+        } else if (poll_res == -1) {
+            if (errno == EINTR) continue;
+            perror("poll");
+            close(sockfd);
+            freeaddrinfo(result);
+            return 1;
+        }
 
         int len = send(
             sockfd,
@@ -177,6 +284,7 @@ int main(int argc, char *argv[])
 
         if (len == -1)
         {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
             if (errno == EINTR && timed_out)
             {
                 fprintf(stderr, "tempest: request timed out\n");
@@ -234,6 +342,40 @@ int main(int argc, char *argv[])
 
     while (1)
     {
+        struct pollfd pfd;
+        pfd.fd = sockfd;
+        pfd.events = POLLIN;
+
+        clock_gettime(CLOCK_MONOTONIC, &current_time);
+        long remaining_ms = 10000 - (current_time.tv_sec - start_time.tv_sec) * 1000
+                            - (current_time.tv_nsec - start_time.tv_nsec) / 1000000;
+
+        if (remaining_ms <= 0) {
+            fprintf(stderr, "tempest: request timed out\n");
+            free(header_buffer);
+            free(body_buffer);
+            close(sockfd);
+            freeaddrinfo(result);
+            return 1;
+        }
+
+        int poll_res = poll(&pfd, 1, remaining_ms);
+        if (poll_res == 0) {
+            fprintf(stderr, "tempest: request timed out\n");
+            free(header_buffer);
+            free(body_buffer);
+            close(sockfd);
+            freeaddrinfo(result);
+            return 1;
+        } else if (poll_res == -1) {
+            if (errno == EINTR) continue;
+            perror("poll");
+            free(header_buffer);
+            free(body_buffer);
+            close(sockfd);
+            freeaddrinfo(result);
+            return 1;
+        }
 
         int n = recv(
             sockfd,
@@ -243,22 +385,13 @@ int main(int argc, char *argv[])
 
         if (n > 0)
         {
-
             if (!headers_done)
             {
-
                 while (header_len + n + 1 > header_capacity)
                 {
-
                     header_capacity *= 2;
-
-                    char *new_buffer =
-                        realloc(
-                            header_buffer,
-                            header_capacity);
-
-                    if (new_buffer == NULL)
-                    {
+                    char *new_buffer = realloc(header_buffer, header_capacity);
+                    if (new_buffer == NULL) {
                         perror("realloc");
                         free(header_buffer);
                         free(body_buffer);
@@ -266,48 +399,26 @@ int main(int argc, char *argv[])
                         freeaddrinfo(result);
                         return 1;
                     }
-
                     header_buffer = new_buffer;
                 }
 
-                memcpy(
-                    header_buffer + header_len,
-                    temp,
-                    n);
-
+                memcpy(header_buffer + header_len, temp, n);
                 header_len += n;
 
-                for (int i = 0;
-                     i <= header_len - 4;
-                     i++)
+                for (int i = 0; i <= header_len - 4; i++)
                 {
-
-                    if (header_buffer[i] == '\r' &&
-                        header_buffer[i + 1] == '\n' &&
-                        header_buffer[i + 2] == '\r' &&
-                        header_buffer[i + 3] == '\n')
+                    if (header_buffer[i] == '\r' && header_buffer[i + 1] == '\n' &&
+                        header_buffer[i + 2] == '\r' && header_buffer[i + 3] == '\n')
                     {
-
                         int body_start = i + 4;
-
-                        int initial_body_size =
-                            header_len - body_start;
-
+                        int initial_body_size = header_len - body_start;
                         if (initial_body_size > 0)
                         {
-
                             while (body_size + initial_body_size > body_capacity)
                             {
-
                                 body_capacity *= 2;
-
-                                char *new_buffer =
-                                    realloc(
-                                        body_buffer,
-                                        body_capacity);
-
-                                if (new_buffer == NULL)
-                                {
+                                char *new_buffer = realloc(body_buffer, body_capacity);
+                                if (new_buffer == NULL) {
                                     perror("realloc");
                                     free(header_buffer);
                                     free(body_buffer);
@@ -315,43 +426,25 @@ int main(int argc, char *argv[])
                                     freeaddrinfo(result);
                                     return 1;
                                 }
-
                                 body_buffer = new_buffer;
                             }
-
-                            memcpy(
-                                body_buffer + body_size,
-                                header_buffer + body_start,
-                                initial_body_size);
-
+                            memcpy(body_buffer + body_size, header_buffer + body_start, initial_body_size);
                             body_size += initial_body_size;
                         }
-
                         header_len = body_start;
-
                         header_buffer[header_len] = '\0';
-
                         headers_done = 1;
-
                         break;
                     }
                 }
             }
             else
             {
-
                 while (body_size + n > body_capacity)
                 {
-
                     body_capacity *= 2;
-
-                    char *new_buffer =
-                        realloc(
-                            body_buffer,
-                            body_capacity);
-
-                    if (new_buffer == NULL)
-                    {
+                    char *new_buffer = realloc(body_buffer, body_capacity);
+                    if (new_buffer == NULL) {
                         perror("realloc");
                         free(header_buffer);
                         free(body_buffer);
@@ -359,26 +452,19 @@ int main(int argc, char *argv[])
                         freeaddrinfo(result);
                         return 1;
                     }
-
                     body_buffer = new_buffer;
                 }
-
-                memcpy(
-                    body_buffer + body_size,
-                    temp,
-                    n);
-
+                memcpy(body_buffer + body_size, temp, n);
                 body_size += n;
             }
         }
         else if (n == 0)
         {
-
             break;
         }
         else
         {
-
+            if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
             if (errno == EINTR && timed_out)
             {
                 fprintf(stderr, "tempest: request timed out\n");
@@ -387,13 +473,10 @@ int main(int argc, char *argv[])
             {
                 perror("recv");
             }
-
             free(header_buffer);
             free(body_buffer);
-
             close(sockfd);
             freeaddrinfo(result);
-
             return 1;
         }
     }

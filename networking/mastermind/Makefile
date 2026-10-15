@@ -3,7 +3,7 @@ CFLAGS = -std=c2x -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 \
           -Wall -Wextra -Werror -Wno-unused-parameter -g
 LDLIBS =
 
-SRCS = main.c mastermind.c codebreaker.c discovery.c utils.c
+SRCS = main.c mastermind.c codebreaker.c discovery.c utils.c udp_codebreaker.c udp_mastermind.c
 OBJS = $(SRCS:.c=.o)
 
 mastermind: $(OBJS)
