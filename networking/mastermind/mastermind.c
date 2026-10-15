@@ -190,7 +190,7 @@ void mastermind_game(
             snprintf(
                 secret_message,
                 sizeof(secret_message),
-                "SECRET %s",
+                "SECRET %.5s",
                 sequence);
 
             if (send_line(
