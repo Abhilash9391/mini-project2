@@ -21,19 +21,25 @@ tempest <city> --raw
 
 #### Design
 
-<!-- how you split the code into files, how you read the response body, and how you detect an invalid location -->
+- everything is in `getWeather.c`.
+- city name is url-encoded using `%XX` for special chars.
+- sends `GET /<city>?0T HTTP/1.1` with `Host: wttr.is` and `Connection: close` headers.
+- used non-blocking sockets (`O_NONBLOCK`) and `poll()` to handle reads and writes.
+- reads response into buffers and looks for `\r\n\r\n` to separate headers from body.
+- normal mode just prints body, while `--raw` prints headers too.
+- 10s timeout handled by `alarm(10)` and calculating time left using `CLOCK_MONOTONIC` in `poll()`.
+- error handling:
+    - prints `tempest: invalid location` if `getaddrinfo` fails or status is not 200.
+    - prints `tempest: request timed out` if it takes > 10s.
+    - prints `missing argument` or `too many arguments` for wrong usage.
 
 #### Changed defaults
 
-<!-- default: request timeout 10 s; write "none" if unchanged -->
-
-#### Assumptions
-
-<!-- anything you took for granted that the spec did not state -->
+none
 
 #### Known bugs
 
-<!-- what does not work, and when; write "none known" if there are none -->
+none known
 
 ### mastermind
 
@@ -102,16 +108,28 @@ usertests -q
 
 ### Copy-on-write fork
 
-<!-- where the reference counts live and how they are locked, which pte bit marks a page cow, and how a write fault duplicates a page -->
+- ref counts are in `kalloc.c` using `refcount[NPAGES]` array, and `kmem.lock` is used so it doesn't crash.
+- in `vm.c`, used `PTE_COW` bit. in `fork`, `uvmcopy` just shares pages between parent and child and marks them read-only.
+- `usertrap` in `trap.c` catches the fault when someone tries to write. if `PTE_COW` is set, it calls `cowalloc` in `vm.c`.
+- `cowalloc` gets a new page from `kalloc`, copies the old stuff using `memmove`, and makes the pte writable.
+- then it calls `kfree` on the old page to drop the count; it only actually frees the page when count is 0.
+- called `sfence_vma()` in `vm.c` to clear the tlb.
 
 ### Alarms
 
-<!-- the fields you added to struct proc, what state sigreturn restores, and how you stop a handler being re-entered -->
+- added some stuff to `struct proc` in `proc.h` like `alarm_interval`, `alarm_ticks`, `alarm_handler`, `alarm_active`, and `alarm_trapframe`.
+- in `trap.c`, timer interrupt increments `alarm_ticks`. once it hits `alarm_interval` and `alarm_active` is 0, it saves the `trapframe` and jumps to `alarm_handler`.
+- `sys_sigreturn` in `sysproc.c` is what the handler calls. it just copies `p->alarm_trapframe` back to `p->trapframe` with `memmove` to restore everything.
+- `alarm_active` is set to 1 when handler starts and 0 when `sys_sigreturn` is called, so you don't get alarms inside alarms.
 
 ### Assumptions
 
-<!-- anything you took for granted that the spec did not state -->
+none known
 
 ### Known bugs
 
-<!-- what does not work, and which test shows it; write "none known" if there are none -->
+none known
+
+
+
+
