@@ -108,19 +108,27 @@ usertests -q
 
 ### Copy-on-write fork
 
-- ref counts are in `kalloc.c` using `refcount[NPAGES]` array, and `kmem.lock` is used so it doesn't crash.
-- in `vm.c`, used `PTE_COW` bit. in `fork`, `uvmcopy` just shares pages between parent and child and marks them read-only.
-- `usertrap` in `trap.c` catches the fault when someone tries to write. if `PTE_COW` is set, it calls `cowalloc` in `vm.c`.
-- `cowalloc` gets a new page from `kalloc`, copies the old stuff using `memmove`, and makes the pte writable.
-- then it calls `kfree` on the old page to drop the count; it only actually frees the page when count is 0.
-- called `sfence_vma()` in `vm.c` to clear the tlb.
+- ref counts are in `kalloc.c` using `refcount[NPAGES]` array; used `kmem.lock` so multiple cores don't mess up the counts at the same time.
+- used `PTE_COW` bit in `vm.c` to mark shared pages. in `fork`, `uvmcopy` just shares pages and marks them read-only so we don't waste time and ram copying everything until it's actually needed.
+- `usertrap` in `trap.c` catches the write fault. if it sees `PTE_COW`, it calls `cowalloc` because the process is trying to change a shared page and needs its own private copy.
+- `cowalloc` in `vm.c` uses `kalloc` and `memmove` to make that copy and makes it writable so the write operation can finally succeed.
+- called `kfree` on the old page to decrement ref count; this is done so the page is only actually deleted when no one else is using it.
+- used `sfence_vma()` in `vm.c` to flush tlb because otherwise the cpu might still think the page is read-only.
 
 ### Alarms
 
-- added some stuff to `struct proc` in `proc.h` like `alarm_interval`, `alarm_ticks`, `alarm_handler`, `alarm_active`, and `alarm_trapframe`.
-- in `trap.c`, timer interrupt increments `alarm_ticks`. once it hits `alarm_interval` and `alarm_active` is 0, it saves the `trapframe` and jumps to `alarm_handler`.
-- `sys_sigreturn` in `sysproc.c` is what the handler calls. it just copies `p->alarm_trapframe` back to `p->trapframe` with `memmove` to restore everything.
-- `alarm_active` is set to 1 when handler starts and 0 when `sys_sigreturn` is called, so you don't get alarms inside alarms.
+- added `alarm_interval`, `alarm_ticks`, `alarm_handler`, `alarm_active`, and `alarm_trapframe` to `struct proc` in `proc.h` to store the timer state and where to jump.
+- in `trap.c`, timer interrupt increments `alarm_ticks`. once it hits `alarm_interval`, it saves the current `trapframe` into `p->alarm_trapframe` so we can come back to the exact same spot later.
+- set `alarm_active` to 1 before jumping to `alarm_handler` so that another alarm doesn't trigger and interrupt the current handler.
+- `sys_sigreturn` in `sysproc.c` copies `p->alarm_trapframe` back to `p->trapframe` using `memmove` to restore all the registers and the pc, and then resets `alarm_active` to 0 to allow new alarms.
+
+### Assumptions
+
+none known
+
+### Known bugs
+
+none known
 
 ### Assumptions
 
