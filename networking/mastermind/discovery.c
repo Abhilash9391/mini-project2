@@ -78,6 +78,14 @@ int create_tcp_listener(const char *port)
         return -1;
     }
 
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0)
+    {
+        perror("setsockopt SO_REUSEPORT");
+        close(sockfd);
+        freeaddrinfo(result);
+        return -1;
+    }
+
     if (bind(
             sockfd,
             result->ai_addr,
@@ -151,6 +159,14 @@ int create_udp_socket(void)
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
     {
         perror("setsockopt SO_REUSEADDR");
+        close(sockfd);
+        freeaddrinfo(result);
+        return -1;
+    }
+
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0)
+    {
+        perror("setsockopt SO_REUSEPORT");
         close(sockfd);
         freeaddrinfo(result);
         return -1;
@@ -391,7 +407,7 @@ void add_player(
 void print_players(
     struct Player *head)
 {
-    printf("\033[H\033[J");
+    printf("\n--- Players Online ---\n");
 
     printf("Players Online:\n");
 
@@ -527,8 +543,7 @@ void receive_discovery(
             ip,
             port_num);
     }
-
-    print_players(*head);
+    // Removed print_players(*head) to prevent console spam on every UDP packet
 }
 
 int remove_expired_players(
@@ -706,28 +721,42 @@ int handle_incoming_connection(
     fflush(stdout);
 
     char response[10];
-    if (fgets(response, sizeof(response), stdin) == NULL)
+    while (1)
     {
-        close(conn_fd);
-        return -1;
-    }
-    remove_newline(response);
-
-    if (strcmp(response, "yes") == 0)
-    {
-        if (send(conn_fd, "yes", 3, 0) < 0)
+        if (fgets(response, sizeof(response), stdin) == NULL)
         {
             close(conn_fd);
             return -1;
         }
-        return conn_fd;
-    }
-    else
-    {
-        send(conn_fd, "no", 2, 0);
-        printf("Challenge rejected.\n");
-        close(conn_fd);
-        return -1;
+        remove_newline(response);
+
+        if (strcmp(response, "yes") == 0 ||
+            strcmp(response, "y") == 0 ||
+            strcmp(response, "YES") == 0 ||
+            strcmp(response, "Y") == 0)
+        {
+            if (send(conn_fd, "yes", 3, 0) < 0)
+            {
+                close(conn_fd);
+                return -1;
+            }
+            return conn_fd;
+        }
+        else if (strcmp(response, "no") == 0 ||
+                 strcmp(response, "n") == 0 ||
+                 strcmp(response, "NO") == 0 ||
+                 strcmp(response, "N") == 0)
+        {
+            send(conn_fd, "no", 2, 0);
+            printf("Challenge rejected.\n");
+            close(conn_fd);
+            return -1;
+        }
+        else
+        {
+            printf("Invalid input. Please type 'yes' or 'no': ");
+            fflush(stdout);
+        }
     }
 }
 
@@ -742,7 +771,8 @@ int discovery_loop(
     struct Player **tail,
     int *codebreaker,
     int cost_cut_mode,
-    struct sockaddr_in *game_opponent_addr)
+    struct sockaddr_in *game_opponent_addr,
+    char *opponent_name)
 {
     time_t last_broadcast = 0;
 
@@ -1002,6 +1032,8 @@ int discovery_loop(
         {
             print_players(*head);
         }
+        // Added a manual trigger or timer could go here, but for now,
+        // let's ensure the user can see the list when they start.
     }
 }
 

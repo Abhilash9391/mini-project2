@@ -48,6 +48,13 @@ int udp_mastermind_game(int fd, struct sockaddr_in *opponent_addr, const char *o
     char feedbacks[MAX_ATTEMPTS][CODE_LENGTH + 1];
     int attempts = 0;
 
+    if (udp_send_reliable(fd, opponent_addr, "READY") < 0) {
+        printf("\n%s disconnected. Press Enter to go home.", opponent_name);
+        fflush(stdout);
+        getchar();
+        return -1;
+    }
+
     while (attempts < MAX_ATTEMPTS) {
         char guess[100];
         char feedback[100];

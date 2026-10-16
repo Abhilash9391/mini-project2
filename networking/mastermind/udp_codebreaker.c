@@ -19,6 +19,14 @@ void udp_codebreaker_game(int fd, struct sockaddr_in *opponent_addr, const char 
     char feedbacks[MAX_ATTEMPTS][CODE_LENGTH + 1];
     int attempts = 0;
 
+    char ready_buf[100];
+    if (udp_recv_reliable(fd, opponent_addr, ready_buf, sizeof(ready_buf)) <= 0 ||
+        strcmp(ready_buf, "READY") != 0)
+    {
+        printf("\nFailed to receive ready signal from mastermind.\n");
+        return;
+    }
+
     while (attempts < MAX_ATTEMPTS) {
         char guess[100];
         char feedback[100];

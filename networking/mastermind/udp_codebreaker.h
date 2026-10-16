@@ -3,6 +3,6 @@
 
 #include <netinet/in.h>
 
-void udp_codebreaker_game(int fd, struct sockaddr_in *opponent_addr);
+void udp_codebreaker_game(int fd, struct sockaddr_in *opponent_addr, const char *opponent_name);
 
 #endif
