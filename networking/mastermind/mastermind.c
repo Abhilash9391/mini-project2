@@ -47,7 +47,8 @@ void calculate_feedback(
 }
 
 void mastermind_game(
-    int game_fd)
+    int game_fd,
+    const char *opponent_name)
 {
     char sequence[100];
 
@@ -81,6 +82,12 @@ void mastermind_game(
         }
 
         break;
+    }
+
+    if (send_line(game_fd, "READY") < 0)
+    {
+        printf("\nPlayer disconnected while sending ready signal.\n");
+        return;
     }
 
     char guesses[

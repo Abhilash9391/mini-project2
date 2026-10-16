@@ -9,6 +9,7 @@ int main(int argc, char *argv[])
 {
 
     int cost_cut_mode = 0;
+    char tcp_port[10] = "8080";
 
     for (int i = 1; i < argc; i++)
     {
@@ -20,9 +21,15 @@ int main(int argc, char *argv[])
         {
             logging_enabled = 1;
         }
+        else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc)
+        {
+            strncpy(tcp_port, argv[i + 1], sizeof(tcp_port) - 1);
+            tcp_port[sizeof(tcp_port) - 1] = '\0';
+            i++;
+        }
         else
         {
-            printf("Usage: %s [--cost-cutting] [--log]\n", argv[0]);
+            printf("Usage: %s [--cost-cutting] [--log] [--port <port>]\n", argv[0]);
             return 1;
         }
     }
@@ -31,7 +38,7 @@ int main(int argc, char *argv[])
     memset(&opponent_addr, 0, sizeof(opponent_addr));
 
     int tcp_fd =
-        create_tcp_listener();
+        create_tcp_listener(tcp_port);
 
     if (tcp_fd < 0)
     {
@@ -58,7 +65,8 @@ int main(int argc, char *argv[])
     create_discovery_message(
         message,
         sizeof(message),
-        name);
+        name,
+        tcp_port);
 
     while (1)
     {
@@ -69,6 +77,7 @@ int main(int argc, char *argv[])
         struct sockaddr_in game_opponent_addr;
         memset(&game_opponent_addr, 0, sizeof(game_opponent_addr));
 
+        char opponent_name[50] = "Unknown";
         int game_fd = discovery_loop(
             udp_fd,
             tcp_fd,
@@ -78,7 +87,8 @@ int main(int argc, char *argv[])
             &tail,
             &codebreaker,
             cost_cut_mode,
-            &game_opponent_addr);
+            &game_opponent_addr,
+            opponent_name);
 
         if (game_fd >= 0)
         {
@@ -86,7 +96,8 @@ int main(int argc, char *argv[])
                 game_fd,
                 codebreaker,
                 &game_opponent_addr,
-                cost_cut_mode);
+                cost_cut_mode,
+                opponent_name);
 
             close(game_fd);
         }

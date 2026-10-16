@@ -26,6 +26,14 @@ int valid_feedback(const char *feedback)
 void codebreaker_game(
     int game_fd)
 {
+    char ready_buf[100];
+    if (recv_line(game_fd, ready_buf, sizeof(ready_buf)) <= 0 ||
+        strcmp(ready_buf, "READY") != 0)
+    {
+        printf("\nFailed to receive ready signal from mastermind.\n");
+        return;
+    }
+
     char guesses[
         MAX_ATTEMPTS][CODE_LENGTH + 1];
 

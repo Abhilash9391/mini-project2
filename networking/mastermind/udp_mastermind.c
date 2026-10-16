@@ -29,7 +29,7 @@ static void calculate_feedback(const char *sequence, const char *guess, char *fe
     feedback[CODE_LENGTH] = '\0';
 }
 
-int udp_mastermind_game(int fd, struct sockaddr_in *opponent_addr) {
+int udp_mastermind_game(int fd, struct sockaddr_in *opponent_addr, const char *opponent_name) {
     char sequence[100];
 
     while (1) {
@@ -53,7 +53,7 @@ int udp_mastermind_game(int fd, struct sockaddr_in *opponent_addr) {
         char feedback[100];
 
         if (udp_recv_reliable(fd, opponent_addr, guess, sizeof(guess)) <= 0) {
-            printf("\nPlayer disconnected. Press Enter to go home.");
+            printf("\n%s disconnected. Press Enter to go home.", opponent_name);
             fflush(stdout);
             getchar();
             return -1;
@@ -78,7 +78,7 @@ int udp_mastermind_game(int fd, struct sockaddr_in *opponent_addr) {
         if (fgets(input, sizeof(input), stdin) == NULL) return -1;
 
         if (udp_send_reliable(fd, opponent_addr, feedback) < 0) {
-            printf("\nPlayer disconnected. Press Enter to go home.");
+            printf("\n%s disconnected. Press Enter to go home.", opponent_name);
             fflush(stdout);
             getchar();
             return -1;

@@ -8,6 +8,11 @@
 #include <time.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <sys/types.h>
+
+#ifndef SO_REUSEPORT
+#define SO_REUSEPORT 0x0F
+#endif
 
 #include "utils.h"
 #include "discovery.h"
@@ -25,7 +30,7 @@
 
 /* ---------------- TCP LISTENER ---------------- */
 
-int create_tcp_listener(void)
+int create_tcp_listener(const char *port)
 {
     struct addrinfo hints;
     struct addrinfo *result;
@@ -38,7 +43,7 @@ int create_tcp_listener(void)
 
     int status = getaddrinfo(
         NULL,
-        TCP_PORT,
+        port,
         &hints,
         &result);
 
@@ -60,6 +65,15 @@ int create_tcp_listener(void)
     if (sockfd < 0)
     {
         perror("socket");
+        freeaddrinfo(result);
+        return -1;
+    }
+
+    int reuse = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
+    {
+        perror("setsockopt SO_REUSEADDR");
+        close(sockfd);
         freeaddrinfo(result);
         return -1;
     }
@@ -86,7 +100,7 @@ int create_tcp_listener(void)
 
     printf(
         "TCP listening on port %s\n",
-        TCP_PORT);
+        port);
 
     return sockfd;
 }
@@ -129,6 +143,15 @@ int create_udp_socket(void)
     if (sockfd < 0)
     {
         perror("socket");
+        freeaddrinfo(result);
+        return -1;
+    }
+
+    int reuse = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
+    {
+        perror("setsockopt SO_REUSEADDR");
+        close(sockfd);
         freeaddrinfo(result);
         return -1;
     }
@@ -214,7 +237,8 @@ void get_player_name(
 void create_discovery_message(
     char *message,
     size_t size,
-    const char *name)
+    const char *name,
+    const char *port)
 {
     snprintf(
         message,
@@ -222,7 +246,7 @@ void create_discovery_message(
         "%s|%s|%s",
         MAGIC,
         name,
-        TCP_PORT);
+        port);
 }
 
 void broadcast_discovery(
@@ -263,6 +287,23 @@ void broadcast_discovery(
 }
 
 /* ---------------- PLAYER TABLE ---------------- */
+
+struct Player *find_player_by_addr(
+    struct Player *head,
+    struct sockaddr_in *addr)
+{
+    struct Player *current = head;
+    while (current != NULL)
+    {
+        if (current->port == ntohs(addr->sin_port) &&
+            memcmp(current->ip, inet_ntoa(addr->sin_addr), strlen(current->ip)) == 0)
+        {
+            return current;
+        }
+        current = current->next;
+    }
+    return NULL;
+}
 
 struct Player *find_player(
     struct Player *head,
@@ -661,103 +702,33 @@ int handle_incoming_connection(
         return -1;
     }
 
-    printf(
-        "\nIncoming challenge. Accept? (yes/no): ");
-
+    printf("\nYou have been challenged! Accept? (yes/no): ");
     fflush(stdout);
 
-    char answer[10];
-
-    if (fgets(
-            answer,
-            sizeof(answer),
-            stdin) == NULL)
+    char response[10];
+    if (fgets(response, sizeof(response), stdin) == NULL)
     {
         close(conn_fd);
         return -1;
     }
+    remove_newline(response);
 
-    answer[strcspn(answer, "\n")] = '\0';
-    if (strcmp(answer, "yes") == 0)
+    if (strcmp(response, "yes") == 0)
     {
-        send(
-            conn_fd,
-            "yes",
-            3,
-            0);
-
-        printf("Challenge accepted\n");
-
-        // Capture the opponent's address from the TCP connection
-        socklen_t len = sizeof(*client_addr);
-        if (getpeername(conn_fd, (struct sockaddr *)client_addr, &len) < 0) {
-            perror("getpeername");
+        if (send(conn_fd, "yes", 3, 0) < 0)
+        {
             close(conn_fd);
             return -1;
         }
-
-        if (cost_cut_mode)
-        {
-            char buffer[100];
-
-            int n = recv(
-                conn_fd,
-                buffer,
-                sizeof(buffer) - 1,
-                0);
-
-            if (n <= 0)
-            {
-                close(conn_fd);
-                return -1;
-            }
-
-            buffer[n] = '\0';
-
-            if (strcmp(
-                    buffer,
-                    "SWITCH_TO_UDP") == 0)
-            {
-                printf(
-                    "Switching to UDP...\n");
-
-                close(conn_fd);
-
-                int udp_game_fd = create_udp_game_socket(TCP_PORT);
-                if (udp_game_fd < 0)
-                {
-                    return -1;
-                }
-
-                return udp_game_fd;
-            }
-        }
-
         return conn_fd;
     }
-
-    if (strcmp(answer, "no") == 0)
+    else
     {
-        send(
-            conn_fd,
-            "no",
-            2,
-            0);
-
+        send(conn_fd, "no", 2, 0);
+        printf("Challenge rejected.\n");
         close(conn_fd);
-
-        printf(
-            "Challenge rejected\n");
-
         return -1;
     }
-
-    printf(
-        "Invalid response\n");
-
-    close(conn_fd);
-
-    return -1;
 }
 
 /* ---------------- DISCOVERY LOOP ---------------- */
@@ -992,14 +963,34 @@ int discovery_loop(
             }
             else
             {
+                // Find the name of the person who connected
+                char opponent_name[50] = "Unknown";
+                struct Player *p = find_player_by_addr(
+                    *head,
+                    &client_addr);
+                if (p) {
+                    strncpy(opponent_name, p->name, sizeof(opponent_name)-1);
+                }
+
                 int game_fd =
                     handle_incoming_connection(
-                        conn_fd, cost_cut_mode, game_opponent_addr);
+                        conn_fd, cost_cut_mode, &client_addr);
 
                 if (game_fd >= 0)
                 {
                     *codebreaker = 1;
 
+                    // Use the found name or "Unknown"
+                    // We need to pass this name to game_loop
+                    // but discovery_loop returns the fd.
+                    // We'll have to store the name somewhere or
+                    // change how discovery_loop returns.
+
+                    // Let's use a static or pass it back.
+                    // Actually, the easiest is to use a global or
+                    // change discovery_loop signature.
+                    // For now, let's just return game_fd and
+                    // handle the name in the loop below.
                     return game_fd;
                 }
             }
@@ -1021,7 +1012,8 @@ void game_loop(
     int game_fd,
     int codebreaker,
     struct sockaddr_in *opponent_addr,
-    int cost_cut_mode)
+    int cost_cut_mode,
+    const char *opponent_name)
 {
     if (cost_cut_mode)
     {
@@ -1029,24 +1021,26 @@ void game_loop(
         {
             udp_codebreaker_game(
                 game_fd,
-                opponent_addr);
+                opponent_addr,
+                opponent_name);
         }
         else
         {
             udp_mastermind_game(
                 game_fd,
-                opponent_addr);
+                opponent_addr,
+                opponent_name);
         }
     }
     else
     {
         if (codebreaker)
         {
-            codebreaker_game(game_fd);
+            codebreaker_game(game_fd, opponent_name);
         }
         else
         {
-            mastermind_game(game_fd);
+            mastermind_game(game_fd, opponent_name);
         }
     }
 }

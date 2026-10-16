@@ -14,7 +14,7 @@ static int valid_feedback(const char *feedback) {
     return 1;
 }
 
-void udp_codebreaker_game(int fd, struct sockaddr_in *opponent_addr) {
+void udp_codebreaker_game(int fd, struct sockaddr_in *opponent_addr, const char *opponent_name) {
     char guesses[MAX_ATTEMPTS][CODE_LENGTH + 1];
     char feedbacks[MAX_ATTEMPTS][CODE_LENGTH + 1];
     int attempts = 0;
@@ -38,14 +38,14 @@ void udp_codebreaker_game(int fd, struct sockaddr_in *opponent_addr) {
         strcpy(guesses[attempts], guess);
 
         if (udp_send_reliable(fd, opponent_addr, guess) < 0) {
-            printf("\nPlayer disconnected. Press Enter to go home.");
+            printf("\n%s disconnected. Press Enter to go home.", opponent_name);
             fflush(stdout);
             getchar();
             return;
         }
 
         if (udp_recv_reliable(fd, opponent_addr, feedback, sizeof(feedback)) <= 0) {
-            printf("\nPlayer disconnected. Press Enter to go home.");
+            printf("\n%s disconnected. Press Enter to go home.", opponent_name);
             fflush(stdout);
             getchar();
             return;

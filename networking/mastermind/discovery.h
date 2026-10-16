@@ -17,7 +17,11 @@ struct Player
     struct Player *next;
 };
 
-int create_tcp_listener(void);
+struct Player *find_player_by_addr(
+    struct Player *head,
+    struct sockaddr_in *addr);
+
+int create_tcp_listener(const char *port);
 
 int create_udp_socket(void);
 
@@ -26,7 +30,8 @@ void get_player_name(char *name, size_t size);
 void create_discovery_message(
     char *message,
     size_t size,
-    const char *name);
+    const char *name,
+    const char *port);
 
 void broadcast_discovery(
     int udp_fd,
@@ -63,13 +68,15 @@ int discovery_loop(
     struct Player **tail,
     int *codebreaker,
     int cost_cut_mode,
-    struct sockaddr_in *game_opponent_addr);
+    struct sockaddr_in *game_opponent_addr,
+    char *opponent_name);
 
 void game_loop(
     int game_fd,
     int codebreaker,
     struct sockaddr_in *opponent_addr,
-    int cost_cut_mode);
+    int cost_cut_mode,
+    const char *opponent_name);
 
 void free_players(
     struct Player *head);
